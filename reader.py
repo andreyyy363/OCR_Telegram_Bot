@@ -1,10 +1,12 @@
 import os
 import zipfile
+import io
 import fitz
 import docx
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 import pytesseract
 
+# Set the path to the Tesseract executable for Docker environment
 pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
 
@@ -16,11 +18,14 @@ def recognize_text_from_image(image_path, lang='eng'):
     """
     Function to extract text from an image using Tesseract OCR
 
-    :param image_path: - path to the image file
-    :param lang: - language for OCR
-    :return: text: - extracted text
+    :param image_path: path to the image file or PIL Image object
+    :param lang: language for OCR
+    :return: text: extracted text
     """
-    image = Image.open(image_path)
+    if isinstance(image_path, str):
+        image = Image.open(image_path)
+    else:
+        image = image_path
     text = pytesseract.image_to_string(image, lang=lang)
     return text
 
@@ -29,11 +34,10 @@ def recognize_text_from_pdf(pdf_path, lang='eng'):
     """
     Function to extract text from a PDF file using PyMuPDF and Tesseract OCR
 
-    :param pdf_path: - path to the PDF file
-    :param lang: - language for OCR
-    :return: text: - extracted text
+    :param pdf_path: path to the PDF file
+    :param lang: language for OCR
+    :return: text: extracted text
     """
-
     doc = fitz.open(pdf_path)
     text = ''
     for page_num in range(len(doc)):
@@ -43,11 +47,13 @@ def recognize_text_from_pdf(pdf_path, lang='eng'):
             xref = img[0]
             base_image = doc.extract_image(xref)
             image_bytes = base_image["image"]
-            image_path = f"temp_image_{page_num}_{xref}.png"
-            with open(image_path, "wb") as img_file:
-                img_file.write(image_bytes)
-            text += recognize_text_from_image(image_path, lang)
-            os.remove(image_path)
+
+            try:
+                image = Image.open(io.BytesIO(image_bytes))
+                text += recognize_text_from_image(image, lang)
+            except (OSError, UnidentifiedImageError, pytesseract.pytesseract.TesseractError) as e:
+                text += f"\n[Error processing image on page {page_num + 1}: {e}]\n"
+
     return text
 
 
@@ -55,9 +61,9 @@ def recognize_text_from_docx(docx_path, lang='eng'):
     """
     Function to extract text from a DOCX file using python-docx and Tesseract OCR
 
-    :param docx_path: - path to the DOCX file
-    :param lang: - language for OCR
-    :return: text: - extracted text
+    :param docx_path: path to the DOCX file
+    :param lang: language for OCR
+    :return: text: extracted text
     """
     doc = docx.Document(docx_path)
     text = ""
@@ -69,12 +75,15 @@ def recognize_text_from_docx(docx_path, lang='eng'):
     for image_path in image_paths:
         try:
             text += recognize_text_from_image(image_path, lang) + "\n"
-        except Exception as e:
+        except (OSError, UnidentifiedImageError, pytesseract.pytesseract.TesseractError) as e:
             text += f"\n[Error processing image {os.path.basename(image_path)}: {e}]\n"
         finally:
-            os.remove(image_path)
+            if os.path.exists(image_path):
+                os.remove(image_path)
 
-    os.rmdir(temp_dir)
+    if os.path.isdir(temp_dir) and not os.listdir(temp_dir):
+        os.rmdir(temp_dir)
+
     return text
 
 
@@ -109,23 +118,38 @@ def process_input_files(file_paths, lang):
     """
     Function to process files and extract text based on the file type
 
-    :param file_paths: - list of file paths
-    :param lang: - lang choice
-    :return: results: - dictionary with file names and extracted text
+    :param file_paths: list of file paths
+    :param lang: Tesseract OCR language code(s), e.g. 'eng' for English, 'fra' for French,
+    or 'eng+fra' for multiple languages
+    :return: results: dictionary with file names and extracted text
     """
 
     results = {}
     for file_path in file_paths:
         if file_path.endswith('.pdf'):
             text = recognize_text_from_pdf(file_path, lang)
-        elif file_path.endswith('.docx') or file_path.endswith('.doc'):
+        elif file_path.endswith('.docx'):
             text = recognize_text_from_docx(file_path, lang)
         elif file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')):
             text = recognize_text_from_image(file_path, lang)
         else:
-            text = "Unsupported file format"
+            raise ValueError(f"Unsupported file format: {file_path}")
 
-        results[os.path.basename(file_path)] = text
+        base_name = os.path.basename(file_path)
+        key = base_name
+
+        if key in results:
+            name, ext = os.path.splitext(base_name)
+            counter = 1
+
+            while True:
+                candidate = f"{name}_{counter}{ext}"
+                if candidate not in results:
+                    key = candidate
+                    break
+                counter += 1
+
+        results[key] = text
 
     return results
 
@@ -134,8 +158,8 @@ def save_texts_to_files(texts, output_dir):
     """
     Function to save extracted texts to files
 
-    :param texts: - dictionary with file names and extracted text
-    :param output_dir: - directory to save the output files
+    :param texts: dictionary with file names and extracted text
+    :param output_dir: directory to save the output files
     """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -144,3 +168,10 @@ def save_texts_to_files(texts, output_dir):
         output_path = os.path.join(output_dir, f"{os.path.splitext(filename)[0]}.txt")
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(text)
+
+# # Example usage
+# file_path = ['test/text_word_ukr_eng.docx', 'test/1.png']
+# alphabet = 'eng'
+# output_path = 'outputs'
+# text = process_input_files(file_path, alphabet)
+# save_texts_to_files(text, output_path)
