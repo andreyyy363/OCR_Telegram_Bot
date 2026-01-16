@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  telegram-bot:
+    build: .
+    env_file:
+      - .env
+    environment:
+      - TOKEN
+    volumes:
+      - './:/app'
+      - '/app/static:/app/static'
+    command: python bot.py
