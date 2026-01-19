@@ -1,10 +1,14 @@
 import os
 import zipfile
 import io
+import tempfile
+import logging
 import fitz
 import docx
 from PIL import Image, UnidentifiedImageError
 import pytesseract
+
+logger = logging.getLogger(__name__)
 
 # Set the path to the Tesseract executable for Docker environment
 pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
@@ -46,14 +50,16 @@ def recognize_text_from_pdf(pdf_path, lang='eng'):
         for img in page.get_images(full=True):
             xref = img[0]
             base_image = doc.extract_image(xref)
-            image_bytes = base_image["image"]
+            image_bytes = base_image['image']
 
             try:
                 image = Image.open(io.BytesIO(image_bytes))
                 text += recognize_text_from_image(image, lang)
             except (OSError, UnidentifiedImageError, pytesseract.pytesseract.TesseractError) as e:
-                text += f"\n[Error processing image on page {page_num + 1}: {e}]\n"
+                logger.error('Error processing image on page %s in %s: %s', page_num + 1, pdf_path, e)
+                text += f'\n[Error processing image on page {page_num + 1}: {e}]\n'
 
+    logger.debug('PDF processing completed: %s', pdf_path)
     return text
 
 
@@ -66,24 +72,20 @@ def recognize_text_from_docx(docx_path, lang='eng'):
     :return: text: extracted text
     """
     doc = docx.Document(docx_path)
-    text = ""
+    text = ''
     for para in doc.paragraphs:
-        text += para.text + "\n"
+        text += para.text + '\n'
 
-    temp_dir = os.path.join(os.path.dirname(docx_path), 'temp_docx_images')
-    image_paths = extract_images_from_docx(docx_path, temp_dir)
-    for image_path in image_paths:
-        try:
-            text += recognize_text_from_image(image_path, lang) + "\n"
-        except (OSError, UnidentifiedImageError, pytesseract.pytesseract.TesseractError) as e:
-            text += f"\n[Error processing image {os.path.basename(image_path)}: {e}]\n"
-        finally:
-            if os.path.exists(image_path):
-                os.remove(image_path)
+    with tempfile.TemporaryDirectory(prefix='docx_images_') as temp_dir:
+        image_paths = extract_images_from_docx(docx_path, temp_dir)
+        for image_path in image_paths:
+            try:
+                text += recognize_text_from_image(image_path, lang) + '\n'
+            except (OSError, UnidentifiedImageError, pytesseract.pytesseract.TesseractError) as e:
+                logger.error('Error processing image %s from %s: %s', os.path.basename(image_path), docx_path, e)
+                text += f'\n[Error processing image {os.path.basename(image_path)}: {e}]\n'
 
-    if os.path.isdir(temp_dir) and not os.listdir(temp_dir):
-        os.rmdir(temp_dir)
-
+    logger.debug('DOCX processing completed: %s', docx_path)
     return text
 
 
@@ -126,6 +128,7 @@ def process_input_files(file_paths, lang):
 
     results = {}
     for file_path in file_paths:
+        logger.info('Processing file: %s with language: %s', os.path.basename(file_path), lang)
         if file_path.endswith('.pdf'):
             text = recognize_text_from_pdf(file_path, lang)
         elif file_path.endswith('.docx'):
@@ -133,7 +136,8 @@ def process_input_files(file_paths, lang):
         elif file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')):
             text = recognize_text_from_image(file_path, lang)
         else:
-            raise ValueError(f"Unsupported file format: {file_path}")
+            logger.error('Unsupported file format: %s', file_path)
+            raise ValueError(f'Unsupported file format: {file_path}')
 
         base_name = os.path.basename(file_path)
         key = base_name
@@ -143,7 +147,7 @@ def process_input_files(file_paths, lang):
             counter = 1
 
             while True:
-                candidate = f"{name}_{counter}{ext}"
+                candidate = f'{name}_{counter}{ext}'
                 if candidate not in results:
                     key = candidate
                     break
@@ -165,13 +169,6 @@ def save_texts_to_files(texts, output_dir):
         os.makedirs(output_dir)
 
     for filename, text in texts.items():
-        output_path = os.path.join(output_dir, f"{os.path.splitext(filename)[0]}.txt")
+        output_path = os.path.join(output_dir, f'{os.path.splitext(filename)[0]}.txt')
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(text)
-
-# # Example usage
-# file_path = ['test/text_word_ukr_eng.docx', 'test/1.png']
-# alphabet = 'eng'
-# output_path = 'outputs'
-# text = process_input_files(file_path, alphabet)
-# save_texts_to_files(text, output_path)

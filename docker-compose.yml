@@ -1,0 +1,14 @@
+services:
+  telegram-bot:
+    build: .
+    env_file:
+      - .env
+    environment:
+      - TOKEN
+    volumes:
+      # Mount only necessary directories, excluding sensitive files
+      - ./handlers:/app/handlers:ro
+      - ./utils:/app/utils:ro
+      - ./logs:/app/logs
+      - ./static:/app/static
+    command: python bot.py
