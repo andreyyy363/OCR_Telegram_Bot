@@ -1,5 +1,5 @@
 inherits:
-    - strictness_high
+  - strictness_high
 
 ignore:
   - venv
@@ -20,30 +20,31 @@ uses:
   - zipfile
   - dotenv
   - pytesseract
+  - logging
 
 pep8:
-    # style checking
-    run: true
-    options:
-        max-line-length: 120
+  # style checking
+  run: true
+  options:
+    max-line-length: 120
 
 pylint:
-    # static analysis and then some
-    run: true
-    options:
-        max-line-length: 120
-        # pytest module has dynamically assigned functions,
-        # raising errors such as: E1101: Module 'pytest' has
-        # no 'mark' member
-        ignored-classes: pytest
-    disable:
-      - no-value-for-parameter
-        # Too many lines in module
-#        - C0302
-        # Used * or ** magic
-#        - W0142
-        # Used builtin function 'filter'.
-        # (For maintainability, one should prefer list comprehension.)
+  # static analysis and then some
+  run: true
+  options:
+    max-line-length: 120
+    # pytest module has dynamically assigned functions,
+    # raising errors such as: E1101: Module 'pytest' has
+    # no 'mark' member
+    ignored-classes: pytest
+  disable:
+    - no-value-for-parameter
+      # Too many lines in module
+      #        - C0302
+      # Used * or ** magic
+      #        - W0142
+      # Used builtin function 'filter'.
+    # (For maintainability, one should prefer list comprehension.)
 #        - W0141
 
 # prospector --profile .prospector.yaml

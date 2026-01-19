@@ -1,72 +1,76 @@
 import json
-import sys
 import os
+import logging
+from consts import REQUIRED_LANGUAGES, REQUIRED_KEYS
 
 TRANSLATIONS_FILE = os.path.join(os.path.dirname(__file__), 'translations.json')
+logger = logging.getLogger(__name__)
 
-REQUIRED_KEYS = [
-    'btn_ukrainian', 'btn_english', 'btn_other_language', 'btn_multiple_languages',
-    'btn_info', 'btn_interface_language', 'btn_back_to_menu', 'btn_confirm',
-    'btn_message', 'btn_text_file', 'choose_interface_language', 'interface_language_set',
-    'start_message', 'info_message', 'choose_alphabet', 'choose_language',
-    'language_selected', 'selected_languages', 'no_language_selected', 'language_added',
-    'choose_multiple_languages', 'please_choose_alphabet', 'not_document', 'file_too_large',
-    'unsupported_format', 'file_uploaded', 'please_upload_file', 'please_choose_delivery',
-    'file_header', 'ocr_languages'
-]
 
-REQUIRED_LANGUAGES = ['uk', 'en']
+class TranslationError(Exception):
+    """
+    Custom exception for translation-related errors.
+
+    Raised when translations file is missing, invalid, or incomplete.
+    Should be caught at application entry point for graceful shutdown.
+    """
 
 
 def load_translations() -> dict:
     """
     Load translations from JSON file with validation.
-    Exits the program if the file is missing or invalid.
+    Raises TranslationError if the file is missing or invalid.
 
     :return: Dictionary with translations
+    :raises TranslationError: If translations file is missing, invalid, or incomplete
     """
+    logger.debug('Loading translations from %s', TRANSLATIONS_FILE)
+
     if not os.path.exists(TRANSLATIONS_FILE):
-        print(f"ПОМИЛКА: Файл перекладів '{TRANSLATIONS_FILE}' не знайдено!")
-        print('ERROR: Translations file not found!')
-        sys.exit(1)
+        error_msg = f"Translations file '{TRANSLATIONS_FILE}' not found"
+        logger.critical(error_msg)
+        raise TranslationError(error_msg)
 
     try:
         with open(TRANSLATIONS_FILE, 'r', encoding='utf-8') as f:
             translations = json.load(f)
+        logger.debug('Translations file parsed successfully')
     except json.JSONDecodeError as e:
-        print('ПОМИЛКА: Файл перекладів має некоректний JSON формат!')
-        print('ERROR: Translations file has invalid JSON format!')
-        print(f'Деталі / Details: {e}')
-        sys.exit(1)
+        error_msg = f'Translations file has invalid JSON format: {e}'
+        logger.critical(error_msg)
+        raise TranslationError(error_msg) from e
     except (OSError, IOError) as e:
-        print('ПОМИЛКА: Не вдалося прочитати файл перекладів!')
-        print('ERROR: Could not read translations file!')
-        print(f'Деталі / Details: {e}')
-        sys.exit(1)
+        error_msg = f'Could not read translations file: {e}'
+        logger.critical(error_msg)
+        raise TranslationError(error_msg) from e
 
     if not isinstance(translations, dict):
-        print("ПОМИЛКА: Файл перекладів має бути JSON об'єктом!")
-        print('ERROR: Translations file must be a JSON object!')
-        sys.exit(1)
+        error_msg = 'Translations file must be a JSON object'
+        logger.critical(error_msg)
+        raise TranslationError(error_msg)
 
+    # Validate required languages and keys
     for lang in REQUIRED_LANGUAGES:
         if lang not in translations:
-            print(f"ПОМИЛКА: Відсутня мова '{lang}' у файлі перекладів!")
-            print(f"ERROR: Missing language '{lang}' in translations file!")
-            sys.exit(1)
+            error_msg = f"Missing language '{lang}' in translations file"
+            logger.critical(error_msg)
+            raise TranslationError(error_msg)
 
         missing_keys = [key for key in REQUIRED_KEYS if key not in translations[lang]]
         if missing_keys:
-            print(f"ПОМИЛКА: Відсутні ключі для мови '{lang}': {missing_keys}")
-            print(f"ERROR: Missing keys for language '{lang}': {missing_keys}")
-            sys.exit(1)
+            error_msg = f"Missing keys for language '{lang}': {missing_keys}"
+            logger.critical(error_msg)
+            raise TranslationError(error_msg)
 
         if not isinstance(translations[lang].get('ocr_languages'), dict):
-            print(f"ПОМИЛКА: 'ocr_languages' для мови '{lang}' має бути об'єктом!")
-            print(f"ERROR: 'ocr_languages' for language '{lang}' must be an object!")
-            sys.exit(1)
+            error_msg = f"'ocr_languages' for language '{lang}' must be an object"
+            logger.critical(error_msg)
+            raise TranslationError(error_msg)
 
-    print('Файл перекладів успішно завантажено / Translations file loaded successfully')
+        logger.debug("Language '%s' validated: %d keys found", lang, len(translations[lang]))
+
+    logger.info('Translations loaded successfully: %d languages, %d required keys per language',
+                len(REQUIRED_LANGUAGES), len(REQUIRED_KEYS))
     return translations
 
 
@@ -80,8 +84,13 @@ def get_text(lang_code: str, key: str, **kwargs) -> str:
     :return: Localized string
     """
     text = TRANSLATIONS.get(lang_code, TRANSLATIONS['uk']).get(key, key)
+    if text == key:
+        logger.warning("Translation key '%s' not found for language '%s'", key, lang_code)
     if kwargs:
-        text = text.format(**kwargs)
+        try:
+            text = text.format(**kwargs)
+        except KeyError as e:
+            logger.error("Missing format argument %s for key '%s'", e, key)
     return text
 
 
@@ -93,6 +102,21 @@ def get_supported_languages(lang_code: str) -> dict:
     :return: Dictionary of language names to OCR codes
     """
     return TRANSLATIONS.get(lang_code, TRANSLATIONS['uk']).get('ocr_languages', {})
+
+
+def get_all_translations_for_key(key: str) -> set:
+    """
+    Get all translations for a given key across all languages.
+    Useful for creating dynamic filters without hardcoded strings.
+
+    :param key: Translation key
+    :return: Set of all translations for this key
+    """
+    translations_set = set()
+    for lang_data in TRANSLATIONS.values():
+        if key in lang_data:
+            translations_set.add(lang_data[key])
+    return translations_set
 
 
 TRANSLATIONS = load_translations()

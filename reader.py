@@ -2,17 +2,20 @@ import os
 import zipfile
 import io
 import tempfile
+import logging
 import fitz
 import docx
 from PIL import Image, UnidentifiedImageError
 import pytesseract
 
+logger = logging.getLogger(__name__)
+
 # Set the path to the Tesseract executable for Docker environment
-# pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
 
 # For local run on Windows, uncomment and set the correct path to tesseract.exe
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 
 def recognize_text_from_image(image_path, lang='eng'):
@@ -53,8 +56,10 @@ def recognize_text_from_pdf(pdf_path, lang='eng'):
                 image = Image.open(io.BytesIO(image_bytes))
                 text += recognize_text_from_image(image, lang)
             except (OSError, UnidentifiedImageError, pytesseract.pytesseract.TesseractError) as e:
+                logger.error('Error processing image on page %s in %s: %s', page_num + 1, pdf_path, e)
                 text += f'\n[Error processing image on page {page_num + 1}: {e}]\n'
 
+    logger.debug('PDF processing completed: %s', pdf_path)
     return text
 
 
@@ -77,8 +82,10 @@ def recognize_text_from_docx(docx_path, lang='eng'):
             try:
                 text += recognize_text_from_image(image_path, lang) + '\n'
             except (OSError, UnidentifiedImageError, pytesseract.pytesseract.TesseractError) as e:
+                logger.error('Error processing image %s from %s: %s', os.path.basename(image_path), docx_path, e)
                 text += f'\n[Error processing image {os.path.basename(image_path)}: {e}]\n'
 
+    logger.debug('DOCX processing completed: %s', docx_path)
     return text
 
 
@@ -121,6 +128,7 @@ def process_input_files(file_paths, lang):
 
     results = {}
     for file_path in file_paths:
+        logger.info('Processing file: %s with language: %s', os.path.basename(file_path), lang)
         if file_path.endswith('.pdf'):
             text = recognize_text_from_pdf(file_path, lang)
         elif file_path.endswith('.docx'):
@@ -128,6 +136,7 @@ def process_input_files(file_paths, lang):
         elif file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')):
             text = recognize_text_from_image(file_path, lang)
         else:
+            logger.error('Unsupported file format: %s', file_path)
             raise ValueError(f'Unsupported file format: {file_path}')
 
         base_name = os.path.basename(file_path)
